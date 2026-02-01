@@ -15,6 +15,8 @@ dependencies = [
     "soundfile>=0.12.0",
     "torch>=2.10.0",
     "transformers>=4.57.3",
+    "pyzmq>=27.1.0",
+    "asyncio>=4.0.0",
 ]
 
 [tool.setuptools.package-dir]

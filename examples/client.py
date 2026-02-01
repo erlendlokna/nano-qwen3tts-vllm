@@ -1,14 +1,14 @@
 """
 Client for Qwen3-TTS server. Calls POST /v1/audio/speech and dumps the PCM stream to a WAV file.
 Supports parallel requests to maximize GPU utilization.
+Uses requests with streaming mode for incremental read.
 """
 
 import argparse
-import json
 import sys
 import time
-import urllib.request
 import wave
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -19,23 +19,45 @@ SAMPLE_WIDTH = 2  # 16-bit = 2 bytes
 
 
 def _request_one(args, url: str, payload: dict, idx: int) -> tuple[int, bytes | Exception]:
-    """Send one request; returns (idx, pcm_bytes) or (idx, exception)."""
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
+    """Send one request with streaming; returns (idx, pcm_bytes) or (idx, exception)."""
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            pcm = resp.read()
+        t_start = time.perf_counter()
+        resp = requests.post(
+            url,
+            json=payload,
+            stream=True,
+            timeout=120,
+            headers={"Accept": "audio/L16"},
+        )
+        resp.raise_for_status()
+
+        chunks = []
+        t_first_chunk = None
+        t_prev = t_start
+        for chunk in resp.iter_content(chunk_size=4096):
+            if chunk:
+                if t_first_chunk is None:
+                    t_first_chunk = time.perf_counter()
+                    first_latency = t_first_chunk - t_start
+                    t_prev = time.perf_counter()
+                    print(f"[{idx}] First chunk latency: {first_latency*1000:.2f}ms", file=sys.stderr)
+                else:
+                    t_now = time.perf_counter()
+                    inner_latency = t_now - t_prev
+                    print(f"[{idx}] Chunk {len(chunks)+1} latency: {inner_latency*1000:.2f}ms", file=sys.stderr)
+                    t_prev = t_now
+                chunks.append(chunk)
+
+        pcm = b"".join(chunks)
         return (idx, pcm)
-    except urllib.error.HTTPError as e:
-        err_msg = f"{e.code} {e.reason}: {e.read().decode('utf-8', errors='replace')}"
-        return (idx, RuntimeError(err_msg))
-    except urllib.error.URLError as e:
-        return (idx, RuntimeError(str(e.reason)))
+    except requests.RequestException as e:
+        err = str(e)
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                err += f": {e.response.text}"
+            except Exception:
+                pass
+        return (idx, RuntimeError(err))
 
 
 def main():
