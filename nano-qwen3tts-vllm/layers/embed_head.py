@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
-from qwen3_tts_vllm.utils.context import get_context
+from nano_qwen3tts_vllm.utils.context import get_context
 
 
 class VocabParallelEmbedding(nn.Module):

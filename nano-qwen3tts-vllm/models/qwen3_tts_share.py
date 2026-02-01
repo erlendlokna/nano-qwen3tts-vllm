@@ -3,11 +3,11 @@ from torch import nn
 import torch.distributed as dist
 
 
-from qwen3_tts_vllm.layers.layernorm import Qwen3TTSRMSNorm
-from qwen3_tts_vllm.layers.linear import ColumnParallelLinear, RowParallelLinear
-from qwen3_tts_vllm.layers.attention import Attention
-from qwen3_tts_vllm.layers.activation import Silu
-from qwen3_tts_vllm.layers.rotary_embedding import get_rope
+from nano_qwen3tts_vllm.layers.layernorm import Qwen3TTSRMSNorm
+from nano_qwen3tts_vllm.layers.linear import ColumnParallelLinear, RowParallelLinear
+from nano_qwen3tts_vllm.layers.attention import Attention
+from nano_qwen3tts_vllm.layers.activation import Silu
+from nano_qwen3tts_vllm.layers.rotary_embedding import get_rope
 
 
 class Qwen3TTSAttention(nn.Module):

@@ -1,8 +1,8 @@
 from collections import deque
 
-from qwen3_tts_vllm.config import Config
-from qwen3_tts_vllm.engine.sequence import Sequence, SequenceStatus
-from qwen3_tts_vllm.engine.block_manager import BlockManager
+from nano_qwen3tts_vllm.config import Config
+from nano_qwen3tts_vllm.engine.sequence import Sequence, SequenceStatus
+from nano_qwen3tts_vllm.engine.block_manager import BlockManager
 
 
 class Scheduler:

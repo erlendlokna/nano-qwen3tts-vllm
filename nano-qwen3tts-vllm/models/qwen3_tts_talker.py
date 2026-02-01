@@ -12,9 +12,9 @@ from torch import nn
 import torch.distributed as dist
 
 
-from qwen3_tts_vllm.layers.embed_head import ParallelLMHead
-from qwen3_tts_vllm.layers.layernorm import Qwen3TTSRMSNorm
-from qwen3_tts_vllm.models.qwen3_tts_share import Qwen3TTSDecoderLayer
+from nano_qwen3tts_vllm.layers.embed_head import ParallelLMHead
+from nano_qwen3tts_vllm.layers.layernorm import Qwen3TTSRMSNorm
+from nano_qwen3tts_vllm.models.qwen3_tts_share import Qwen3TTSDecoderLayer
 
 
 

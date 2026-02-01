@@ -3,11 +3,11 @@ from time import perf_counter
 from tqdm.auto import tqdm
 
 
-from qwen3_tts_vllm.engine.llm_engine.base import LLMEngine
-from qwen3_tts_vllm.engine.scheduler import Scheduler
-from qwen3_tts_vllm.engine.model_runner.predictor_model_runner import PredictorSequence
-from qwen3_tts_vllm.sampling_params import SamplingParams
-from qwen3_tts_vllm.engine.model_runner.predictor_model_runner import PredictorModelRunner
+from nano_qwen3tts_vllm.engine.llm_engine.base import LLMEngine
+from nano_qwen3tts_vllm.engine.scheduler import Scheduler
+from nano_qwen3tts_vllm.engine.model_runner.predictor_model_runner import PredictorSequence
+from nano_qwen3tts_vllm.sampling_params import SamplingParams
+from nano_qwen3tts_vllm.engine.model_runner.predictor_model_runner import PredictorModelRunner
 
 class PredictorLLMEngine(LLMEngine):
     def __init__(self, model, **kwargs):

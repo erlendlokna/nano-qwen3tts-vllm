@@ -6,14 +6,14 @@ from typing import Optional
 
 from safetensors.torch import load_file
 
-from qwen3_tts_vllm.engine.model_runner.base import ModelRunner
-from qwen3_tts_vllm.config import Qwen3TTSConfig
-from qwen3_tts_vllm.models.qwen3_tts_predictor import Qwen3TTSCodePredictorForCausalLM
-from qwen3_tts_vllm.engine.sequence import Sequence
-from qwen3_tts_vllm.sampling_params import SamplingParams
+from nano_qwen3tts_vllm.engine.model_runner.base import ModelRunner
+from nano_qwen3tts_vllm.config import Qwen3TTSConfig
+from nano_qwen3tts_vllm.models.qwen3_tts_predictor import Qwen3TTSCodePredictorForCausalLM
+from nano_qwen3tts_vllm.engine.sequence import Sequence
+from nano_qwen3tts_vllm.sampling_params import SamplingParams
 
-from qwen3_tts_vllm.utils.context import set_context, get_context, reset_context
-from qwen3_tts_vllm.config import Config
+from nano_qwen3tts_vllm.utils.context import set_context, get_context, reset_context
+from nano_qwen3tts_vllm.config import Config
 from multiprocessing.synchronize import Event
 
 

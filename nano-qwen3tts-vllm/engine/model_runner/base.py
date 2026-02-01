@@ -8,13 +8,13 @@ from typing import Optional
 from multiprocessing.synchronize import Event
 from multiprocessing.shared_memory import SharedMemory
 
-from qwen3_tts_vllm.config import Config
-from qwen3_tts_vllm.engine.sequence import Sequence
-from qwen3_tts_vllm.layers.sampler import Sampler
-from qwen3_tts_vllm.utils.context import set_context, get_context, reset_context
-from qwen3_tts_vllm.config import Qwen3TTSConfig
-from qwen3_tts_vllm.models.qwen3_tts_talker import Qwen3TTSTalkerForCausalLM
-from qwen3_tts_vllm.models.qwen3_tts_predictor import Qwen3TTSCodePredictorForCausalLM
+from nano_qwen3tts_vllm.config import Config
+from nano_qwen3tts_vllm.engine.sequence import Sequence
+from nano_qwen3tts_vllm.layers.sampler import Sampler
+from nano_qwen3tts_vllm.utils.context import set_context, get_context, reset_context
+from nano_qwen3tts_vllm.config import Qwen3TTSConfig
+from nano_qwen3tts_vllm.models.qwen3_tts_talker import Qwen3TTSTalkerForCausalLM
+from nano_qwen3tts_vllm.models.qwen3_tts_predictor import Qwen3TTSCodePredictorForCausalLM
 
 MODEL_TYPE_MAPPING = {
     "talker": Qwen3TTSTalkerForCausalLM,

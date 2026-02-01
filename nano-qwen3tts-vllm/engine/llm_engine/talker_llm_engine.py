@@ -1,12 +1,12 @@
 import torch
-from qwen3_tts_vllm.engine.llm_engine.base import LLMEngine
-from qwen3_tts_vllm.engine.sequence import Sequence, SequenceStatus
-from qwen3_tts_vllm.engine.scheduler import Scheduler
-from qwen3_tts_vllm.sampling_params import SamplingParams
-from qwen3_tts_vllm.engine.model_runner.talker_mode_runner import TalkerModeModelRunner
+from nano_qwen3tts_vllm.engine.llm_engine.base import LLMEngine
+from nano_qwen3tts_vllm.engine.sequence import Sequence, SequenceStatus
+from nano_qwen3tts_vllm.engine.scheduler import Scheduler
+from nano_qwen3tts_vllm.sampling_params import SamplingParams
+from nano_qwen3tts_vllm.engine.model_runner.talker_mode_runner import TalkerModeModelRunner
 
 
-from qwen3_tts_vllm.config import Config
+from nano_qwen3tts_vllm.config import Config
 
 class TalkerScheduler(Scheduler):
     def __init__(self, config: Config):

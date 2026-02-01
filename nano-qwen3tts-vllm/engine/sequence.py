@@ -3,7 +3,7 @@ from enum import Enum, auto
 from itertools import count
 from typing import Optional
 import torch
-from qwen3_tts_vllm.sampling_params import SamplingParams
+from nano_qwen3tts_vllm.sampling_params import SamplingParams
 
 
 class SequenceStatus(Enum):

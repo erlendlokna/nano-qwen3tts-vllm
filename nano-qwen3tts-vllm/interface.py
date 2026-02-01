@@ -8,12 +8,12 @@ import numpy as np
 import soundfile as sf
 import time
 from tqdm import tqdm
-from qwen3_tts_vllm.utils.context import set_context
-from qwen3_tts_vllm.utils.prompt import prepare_custom_voice_prompt
-from qwen3_tts_vllm.processor import Qwen3TTSProcessor
-from qwen3_tts_vllm.utils.generation import prepare_inputs
-from qwen3_tts_vllm.llm import TalkerLLM, PredictorLLM
-from qwen3_tts_vllm.sampling_params import SamplingParams
+from nano_qwen3tts_vllm.utils.context import set_context
+from nano_qwen3tts_vllm.utils.prompt import prepare_custom_voice_prompt
+from nano_qwen3tts_vllm.processor import Qwen3TTSProcessor
+from nano_qwen3tts_vllm.utils.generation import prepare_inputs
+from nano_qwen3tts_vllm.llm import TalkerLLM, PredictorLLM
+from nano_qwen3tts_vllm.sampling_params import SamplingParams
 from qwen_tts import Qwen3TTSTokenizer
 
 tokenizer = Qwen3TTSTokenizer.from_pretrained(

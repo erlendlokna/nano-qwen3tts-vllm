@@ -2,7 +2,7 @@ from collections import deque
 import xxhash
 import numpy as np
 
-from qwen3_tts_vllm.engine.sequence import Sequence
+from nano_qwen3tts_vllm.engine.sequence import Sequence
 
 
 class Block:
