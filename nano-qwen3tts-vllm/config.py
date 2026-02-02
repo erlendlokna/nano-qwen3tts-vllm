@@ -306,6 +306,7 @@ class Qwen3TTSTalkerCodePredictorConfig(BaseConfig):
         layer_types=None,
         attention_dropout=0,
         num_code_groups=16,  # Predictor generates codebooks 1-15 (15 codebooks)
+        talker_hidden_size=1024,
         **kwargs,
     ):
         super().__init__(
@@ -315,6 +316,7 @@ class Qwen3TTSTalkerCodePredictorConfig(BaseConfig):
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
+        self.talker_hidden_size = talker_hidden_size
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
