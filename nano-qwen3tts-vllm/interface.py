@@ -1046,6 +1046,9 @@ class Qwen3TTSInterface:
                     generation_step += 1
                     self.talker_llm.add_request([next_talker_embeds], talker_sampling_params, request_id=request_id)
         finally:
+            # Clear pending LLM requests so the engine loop stops working on them
+            self.talker_llm.clear_request(request_id)
+            self.predictor_llm.clear_request(request_id)
             async with self._queues_lock:
                 self._request_queues.pop(request_id, None)
 
