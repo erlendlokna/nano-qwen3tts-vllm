@@ -1,5 +1,7 @@
 # nano-qwen3tts-vllm
 
+Fork to include streaming of clones.
+
 Qwen3-TTS with nano vLLM-style optimizations for fast text-to-speech generation.
 
 ## Author note
