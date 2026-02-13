@@ -177,7 +177,9 @@ class Qwen3TTSInterface:
         self.predictor_input_embeddings = self.predictor_llm.model_runner.model.model.codec_embedding
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+        # Talker model dtype — used to cast speaker embeddings (must match codec embeddings).
+        self.dtype = next(self.input_embedding.parameters()).dtype
+
         # Initialize speech tokenizer and speaker encoder if available
         self.speech_tokenizer = None
         self.speaker_encoder = None
@@ -601,7 +603,7 @@ class Qwen3TTSInterface:
         
         # Prepare generate_speaker_prompt_fn and generate_icl_prompt_fn
         def generate_speaker_prompt_fn(prompt):
-            return generate_speaker_prompt(prompt, self.device)
+            return generate_speaker_prompt(prompt, self.device, dtype=self.dtype)
         
         def generate_icl_prompt_fn(text_id, ref_id, ref_code, tts_pad_embed, tts_eos_embed, non_streaming_mode):
             return generate_icl_prompt(
@@ -639,7 +641,7 @@ class Qwen3TTSInterface:
         yield from self._generate_caller_driven(
             talker_input_embeds, trailing_text_hiddens, tts_pad_embed,
             str(uuid.uuid4()),
-            SamplingParams(temperature=1.0, max_tokens=1),
+            SamplingParams(temperature=0.9, max_tokens=1),
             SamplingParams(temperature=0.9, max_tokens=17),
         )
     
@@ -709,7 +711,7 @@ class Qwen3TTSInterface:
         yield from self._generate_caller_driven(
             talker_input_embeds, trailing_text_hiddens, tts_pad_embed,
             str(uuid.uuid4()),
-            SamplingParams(temperature=1.0, max_tokens=1),
+            SamplingParams(temperature=0.9, max_tokens=1),
             SamplingParams(temperature=0.9, max_tokens=17),
         )
     
@@ -767,7 +769,7 @@ class Qwen3TTSInterface:
         yield from self._generate_caller_driven(
             talker_input_embeds, trailing_text_hiddens, tts_pad_embed,
             str(uuid.uuid4()),
-            SamplingParams(temperature=1.0, max_tokens=1),
+            SamplingParams(temperature=0.9, max_tokens=1),
             SamplingParams(temperature=0.9, max_tokens=17),
         )
 
@@ -924,7 +926,7 @@ class Qwen3TTSInterface:
                 }
 
                 def _speaker_prompt_fn(p):
-                    return generate_speaker_prompt(p, self.device)
+                    return generate_speaker_prompt(p, self.device, dtype=self.dtype)
 
                 def _icl_prompt_fn(text_id, ref_id, ref_code, tts_pad_embed, tts_eos_embed, non_streaming_mode):
                     return generate_icl_prompt(
@@ -971,7 +973,7 @@ class Qwen3TTSInterface:
         if self.zmq_bridge is not None:
             raise RuntimeError("When using ZMQ bridge use generate_async() after await start_zmq_tasks()")
         request_id = request_id or str(uuid.uuid4())
-        talker_sampling_params = SamplingParams(temperature=1.0, max_tokens=1)
+        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1)
         predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
         yield from self._generate_caller_driven(
             inputs_embeds, trailing_text_hiddens, tts_pad_embed,
@@ -989,7 +991,7 @@ class Qwen3TTSInterface:
         """Async generator of codebook_id chunks. ZMQ path; step() runs on event loop thread. Call await start_zmq_tasks() first."""
         if self.zmq_bridge is None:
             raise RuntimeError("generate_async requires zmq_bridge")
-        talker_sampling_params = SamplingParams(temperature=1.0, max_tokens=1)
+        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1)
         predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
         request_id = request_id or str(uuid.uuid4())
         request_queue: asyncio.Queue = asyncio.Queue()
