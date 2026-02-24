@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import io
+import json
 import os
 import queue
 import threading
@@ -62,6 +63,7 @@ class Qwen3TTSInterface:
         enforce_eager: bool = False,
         tensor_parallel_size: int = 1,
         zmq_bridge=None,
+        external_speech_tokenizer=None,
     ):
         """Load Qwen3TTSInterface from HuggingFace model repository or local path.
         
@@ -158,9 +160,17 @@ class Qwen3TTSInterface:
             enforce_eager=enforce_eager,
             tensor_parallel_size=tensor_parallel_size,
             zmq_bridge=zmq_bridge,
+            external_speech_tokenizer=external_speech_tokenizer,
         )
     
-    def __init__(self, model_path: str, enforce_eager: bool = False, tensor_parallel_size: int = 1, zmq_bridge=None):
+    def __init__(
+        self,
+        model_path: str,
+        enforce_eager: bool = False,
+        tensor_parallel_size: int = 1,
+        zmq_bridge=None,
+        external_speech_tokenizer=None,
+    ):
         self.model_path = model_path
         self.enforce_eager = enforce_eager
         self.tensor_parallel_size = tensor_parallel_size
@@ -180,9 +190,11 @@ class Qwen3TTSInterface:
         # Talker model dtype — used to cast speaker embeddings (must match codec embeddings).
         self.dtype = next(self.input_embedding.parameters()).dtype
 
-        # Initialize speech tokenizer and speaker encoder if available
-        self.speech_tokenizer = None
+        # Initialize speech components once during startup.
+        self.speech_tokenizer = external_speech_tokenizer
         self.speaker_encoder = None
+        self._tts_model_type = self._detect_tts_model_type()
+        self._speaker_encoder_available = self._tts_model_type == "base"
         self._init_speech_components()
 
         # ZMQ path: asyncio queues; dispatcher and engine run as asyncio tasks (no threads).
@@ -216,57 +228,79 @@ class Qwen3TTSInterface:
         gc.collect()
         torch.cuda.empty_cache()
     
-    def _init_speech_components(self):
-        """Initialize speech tokenizer and speaker encoder from model if available."""
-        try:
-            # Try to load speech tokenizer
-            if HAS_SPEECH_TOKENIZER:
-                self.speech_tokenizer = SpeechTokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", dtype=torch.bfloat16)
-            
-            # Try to load speaker encoder from model
-            # Check if speaker_encoder exists in the model
+    def _detect_tts_model_type(self) -> str:
+        model_type = str(getattr(self.model_config, "tts_model_type", "") or "").strip().lower()
+        if model_type:
+            return model_type
+        config_path = Path(self.model_path) / "config.json"
+        if config_path.is_file():
             try:
-                from qwen_tts.core.models import Qwen3TTSForConditionalGeneration
-                # Try to load just to check if speaker encoder exists
-                # We'll load it lazily when needed
-                self._speaker_encoder_available = True
-            except:
-                self._speaker_encoder_available = False
-        except Exception as e:
-            print(f"Warning: Could not initialize speech components: {e}")
-            self.speech_tokenizer = None
-            self._speaker_encoder_available = False
-    
+                with config_path.open("r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                return str(loaded.get("tts_model_type", "")).strip().lower()
+            except Exception:
+                pass
+        return ""
+
+    def _init_speech_components(self):
+        """Initialize speech tokenizer and speaker encoder once at startup."""
+        if self.speech_tokenizer is None:
+            if not HAS_SPEECH_TOKENIZER:
+                raise RuntimeError("speech_tokenizer unavailable: qwen_tts is not installed")
+            self.speech_tokenizer = SpeechTokenizer(
+                "Qwen/Qwen3-TTS-Tokenizer-12Hz",
+                dtype=torch.bfloat16,
+            )
+
+        if self._speaker_encoder_available:
+            self._load_speaker_encoder()
+
     def _load_speaker_encoder(self):
-        """Lazily load speaker encoder from model."""
+        """Load speaker encoder directly from model config + safetensors."""
         if self.speaker_encoder is not None:
             return self.speaker_encoder
-        
+
         if not self._speaker_encoder_available:
             raise RuntimeError("Speaker encoder not available for this model")
-        
-        try:
-            from qwen_tts.core.models import Qwen3TTSForConditionalGeneration
-            # Load model just to get speaker encoder
-            # This is a bit inefficient, but necessary for now
-            temp_model = Qwen3TTSForConditionalGeneration.from_pretrained(
-                self.model_path,
-                device_map="cpu",  # Load to CPU first
-            )
-            if hasattr(temp_model, 'speaker_encoder') and temp_model.speaker_encoder is not None:
-                self.speaker_encoder = temp_model.speaker_encoder.to(self.device)
-                # Get dtype from model
-                if hasattr(temp_model, 'dtype'):
-                    self.speaker_encoder = self.speaker_encoder.to(temp_model.dtype)
-                return self.speaker_encoder
-            else:
-                self._speaker_encoder_available = False
-                raise RuntimeError("Model does not have speaker_encoder")
-        except Exception as e:
-            print(f"Warning: Could not load speaker encoder: {e}")
+
+        from qwen_tts.core.models.configuration_qwen3_tts import (
+            Qwen3TTSSpeakerEncoderConfig,
+        )
+        from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSSpeakerEncoder
+        from safetensors import safe_open
+
+        config_path = Path(self.model_path) / "config.json"
+        with config_path.open("r", encoding="utf-8") as f:
+            loaded = json.load(f)
+
+        speaker_cfg_raw = loaded.get("speaker_encoder_config")
+        if speaker_cfg_raw is None:
             self._speaker_encoder_available = False
-            raise
-    
+            raise RuntimeError("speaker_encoder_config missing in model config")
+
+        speaker_encoder = Qwen3TTSSpeakerEncoder(
+            Qwen3TTSSpeakerEncoderConfig(**speaker_cfg_raw)
+        )
+
+        prefix = "speaker_encoder."
+        state_dict = {}
+        weights_path = Path(self.model_path) / "model.safetensors"
+        with safe_open(str(weights_path), framework="pt", device="cpu") as sf:
+            for key in sf.keys():
+                if key.startswith(prefix):
+                    state_dict[key[len(prefix) :]] = sf.get_tensor(key)
+
+        if not state_dict:
+            self._speaker_encoder_available = False
+            raise RuntimeError("speaker encoder weights not found in model.safetensors")
+
+        speaker_encoder.load_state_dict(state_dict, strict=False)
+        self.speaker_encoder = speaker_encoder.to(self.device)
+        if hasattr(self, "dtype"):
+            self.speaker_encoder = self.speaker_encoder.to(self.dtype)
+        self.speaker_encoder = self.speaker_encoder.eval()
+        return self.speaker_encoder
+
     def _build_ref_text(self, text: str) -> str:
         """Build reference text format for ICL mode.
         
@@ -465,8 +499,9 @@ class Qwen3TTSInterface:
         # Transpose to [16, time] and add batch dim -> [1, 16, time]
         codebook_tensor = codebook_tensor.transpose(0, 1).unsqueeze(0)  # [1, 16, time]
         
-        # Decode using speech tokenizer
-        wavs, sr = self.speech_tokenizer.decode(codebook_tensor)
+        # Decode using tokenizer API (compatible with both tokenizer wrappers).
+        decode_input = [{"audio_codes": codebook_tensor[0].transpose(0, 1)}]
+        wavs, sr = self.speech_tokenizer.decode(decode_input)
         return wavs, sr
     
     def create_voice_clone_prompt(
@@ -497,10 +532,10 @@ class Qwen3TTSInterface:
         # Normalize audio input
         wav, sr = self._normalize_audio_inputs([ref_audio])[0]
         
-        # Encode audio to codes
-        enc = self.speech_tokenizer.tokenizer.encode(wav, sr=sr)
-        # enc.audio_codes[0] is [time, 16]
-        ref_code = enc.audio_codes[0].cpu()
+        ref_code = None
+        if not x_vector_only_mode:
+            enc = self.speech_tokenizer.tokenizer.encode(wav, sr=sr)
+            ref_code = enc.audio_codes[0].cpu()
         
         # Resample to 24kHz for speaker encoder if needed
         wav_resample = wav
@@ -515,7 +550,7 @@ class Qwen3TTSInterface:
         spk_emb = self.extract_speaker_embedding(audio=wav_resample, sr=24000)
         
         return {
-            "ref_code": None if x_vector_only_mode else ref_code,
+            "ref_code": ref_code,
             "ref_spk_embedding": spk_emb,
             "x_vector_only_mode": bool(x_vector_only_mode),
             "icl_mode": bool(not x_vector_only_mode),
@@ -742,6 +777,8 @@ class Qwen3TTSInterface:
     async def stop_zmq_tasks(self) -> None:
         """Stop ZMQ tasks so the event loop can exit. Puts sentinel in inbox to unblock executor thread."""
         if not self._zmq_tasks:
+            self._zmq_tasks_started = False
+            self._zmq_inbox = None
             return
         # Unblock the thread blocked on inbox.get() in run_in_executor so shutdown_default_executor() can finish
         if self._zmq_inbox is not None:
@@ -751,6 +788,7 @@ class Qwen3TTSInterface:
         await asyncio.gather(*self._zmq_tasks, return_exceptions=True)
         self._zmq_tasks.clear()
         self._zmq_inbox = None
+        self._zmq_tasks_started = False
 
     def generate_custom_voice(self, text: str, language: str = "English", speaker: str = "Vivian"):
         """Sync generator. Only valid when zmq_bridge is None. For ZMQ use generate_custom_voice_async()."""
