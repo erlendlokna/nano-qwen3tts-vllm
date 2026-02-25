@@ -20,6 +20,8 @@ class PredictorScheduler(Scheduler):
         if request_id in self.request_id_to_seq:
             seq = self.request_id_to_seq.pop(request_id)
             self.block_manager.deallocate(seq)
+            if seq in self.waiting:
+                self.waiting.remove(seq)
             if seq in self.running:
                 self.running.remove(seq)
 

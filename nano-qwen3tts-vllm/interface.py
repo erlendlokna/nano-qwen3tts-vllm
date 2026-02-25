@@ -205,6 +205,41 @@ class Qwen3TTSInterface:
         self._zmq_tasks_started = False
         # Serialize request prep (GPU work) so event loop can run engine while another request prepares.
         self._prep_lock = threading.Lock()
+        # Request IDs marked for cancellation (handles races where cancel arrives before queue registration).
+        self._cancelled_request_ids: set[str] = set()
+        self._cancel_state_lock = threading.Lock()
+
+    def _mark_request_cancelled(self, request_id: str) -> None:
+        with self._cancel_state_lock:
+            if len(self._cancelled_request_ids) > 4096:
+                self._cancelled_request_ids.clear()
+            self._cancelled_request_ids.add(request_id)
+
+    def _consume_request_cancelled(self, request_id: str) -> bool:
+        with self._cancel_state_lock:
+            if request_id in self._cancelled_request_ids:
+                self._cancelled_request_ids.remove(request_id)
+                return True
+        return False
+
+    async def cancel_request(self, request_id: str) -> bool:
+        """Cancel an in-flight async request by request_id."""
+        if not request_id:
+            return False
+
+        self._mark_request_cancelled(request_id)
+        self.talker_llm.clear_request(request_id)
+        self.predictor_llm.clear_request(request_id)
+
+        async with self._queues_lock:
+            q = self._request_queues.get(request_id)
+        if q is None:
+            return False
+        try:
+            q.put_nowait(("system", "cancel", {}))
+        except Exception:
+            pass
+        return True
 
     def shutdown(self):
         """Explicitly release GPU resources (models, KV cache, CUDA graphs).
@@ -818,6 +853,7 @@ class Qwen3TTSInterface:
     async def generate_custom_voice_async(
         self, text: str, language: str = "English", speaker: str = "Vivian",
         instruct: Optional[str] = None,
+        request_id: Optional[str] = None,
     ):
         """Async generator of codebook_id chunks. Requires zmq_bridge; call await start_zmq_tasks() first."""
         if self.zmq_bridge is None:
@@ -844,7 +880,11 @@ class Qwen3TTSInterface:
             None, _prep_in_thread
         )
         async for chunk in self.generate_async(
-            talker_input_embeds, trailing_text_hiddens, tts_pad_embed, talker_attention_mask
+            talker_input_embeds,
+            trailing_text_hiddens,
+            tts_pad_embed,
+            talker_attention_mask,
+            request_id=request_id,
         ):
             yield chunk
 
@@ -854,6 +894,7 @@ class Qwen3TTSInterface:
         instruct: str,
         language: str = None,
         non_streaming_mode: bool = True,
+        request_id: Optional[str] = None,
     ):
         """Async generator of codebook_id chunks for voice design. Requires zmq_bridge.
 
@@ -900,7 +941,11 @@ class Qwen3TTSInterface:
             None, _prep_in_thread
         )
         async for chunk in self.generate_async(
-            talker_input_embeds, trailing_text_hiddens, tts_pad_embed, talker_attention_mask
+            talker_input_embeds,
+            trailing_text_hiddens,
+            tts_pad_embed,
+            talker_attention_mask,
+            request_id=request_id,
         ):
             yield chunk
 
@@ -911,6 +956,7 @@ class Qwen3TTSInterface:
         ref_text: Optional[str] = None,
         voice_clone_prompt: Optional[Dict[str, Any]] = None,
         non_streaming_mode: bool = True,
+        request_id: Optional[str] = None,
     ):
         """Async generator of codebook_id chunks for voice clone. Requires zmq_bridge.
 
@@ -1006,7 +1052,11 @@ class Qwen3TTSInterface:
             None, _prep_in_thread
         )
         async for chunk in self.generate_async(
-            talker_input_embeds, trailing_text_hiddens, tts_pad_embed, talker_attention_mask
+            talker_input_embeds,
+            trailing_text_hiddens,
+            tts_pad_embed,
+            talker_attention_mask,
+            request_id=request_id,
         ):
             yield chunk
 
@@ -1036,6 +1086,8 @@ class Qwen3TTSInterface:
         talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1)
         predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
         request_id = request_id or str(uuid.uuid4())
+        if self._consume_request_cancelled(request_id):
+            return
         request_queue: asyncio.Queue = asyncio.Queue()
         async with self._queues_lock:
             self._request_queues[request_id] = request_queue
@@ -1048,6 +1100,8 @@ class Qwen3TTSInterface:
 
             while True:
                 engine_type, msg_type, payload = await request_queue.get()
+                if engine_type == "system" and msg_type == "cancel":
+                    break
                 if engine_type == "talker" and msg_type == "done":
                     self.talker_llm.clear_request(request_id)
                     break
@@ -1072,7 +1126,16 @@ class Qwen3TTSInterface:
                     self.predictor_llm.add_request(
                         [predictor_inputs_embeds], predictor_sampling_params, request_id=request_id,
                     )
-                    _, _, payload2 = await request_queue.get()
+                    payload2 = None
+                    while True:
+                        engine_type2, msg_type2, payload2 = await request_queue.get()
+                        if engine_type2 == "system" and msg_type2 == "cancel":
+                            payload2 = None
+                            break
+                        if engine_type2 == "predictor" and msg_type2 == "token":
+                            break
+                    if payload2 is None:
+                        break
                     pred_token_ids = payload2.get("token_ids", [])
                     codebook_ids = [last_id] + pred_token_ids
                     yield codebook_ids
@@ -1093,6 +1156,8 @@ class Qwen3TTSInterface:
             # Clear pending LLM requests so the engine loop stops working on them
             self.talker_llm.clear_request(request_id)
             self.predictor_llm.clear_request(request_id)
+            with self._cancel_state_lock:
+                self._cancelled_request_ids.discard(request_id)
             async with self._queues_lock:
                 self._request_queues.pop(request_id, None)
 
