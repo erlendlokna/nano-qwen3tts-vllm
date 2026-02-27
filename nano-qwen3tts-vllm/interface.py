@@ -64,6 +64,11 @@ class Qwen3TTSInterface:
         tensor_parallel_size: int = 1,
         zmq_bridge=None,
         external_speech_tokenizer=None,
+        max_num_seqs: int = 512,
+        max_num_batched_tokens: int = 16384,
+        talker_gpu_memory_utilization: float = 0.3,
+        predictor_gpu_memory_utilization: float = 0.9,
+        eager_speaker_encoder: bool = False,
     ):
         """Load Qwen3TTSInterface from HuggingFace model repository or local path.
         
@@ -82,6 +87,11 @@ class Qwen3TTSInterface:
             enforce_eager: Whether to enforce eager mode (disable CUDA graphs).
             tensor_parallel_size: Number of GPUs for tensor parallelism.
             zmq_bridge: Optional ZMQ bridge for async generation.
+            max_num_seqs: Maximum concurrent decode sequences for nano engine graph capture/scheduling.
+            max_num_batched_tokens: Maximum batched tokens used by warmup/scheduler.
+            talker_gpu_memory_utilization: GPU memory fraction reserved for talker KV cache.
+            predictor_gpu_memory_utilization: GPU memory fraction reserved for predictor KV cache.
+            eager_speaker_encoder: If True, load speaker encoder during startup instead of first use.
         
         Returns:
             Qwen3TTSInterface instance.
@@ -161,6 +171,11 @@ class Qwen3TTSInterface:
             tensor_parallel_size=tensor_parallel_size,
             zmq_bridge=zmq_bridge,
             external_speech_tokenizer=external_speech_tokenizer,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+            talker_gpu_memory_utilization=talker_gpu_memory_utilization,
+            predictor_gpu_memory_utilization=predictor_gpu_memory_utilization,
+            eager_speaker_encoder=eager_speaker_encoder,
         )
     
     def __init__(
@@ -170,13 +185,33 @@ class Qwen3TTSInterface:
         tensor_parallel_size: int = 1,
         zmq_bridge=None,
         external_speech_tokenizer=None,
+        max_num_seqs: int = 512,
+        max_num_batched_tokens: int = 16384,
+        talker_gpu_memory_utilization: float = 0.3,
+        predictor_gpu_memory_utilization: float = 0.9,
+        eager_speaker_encoder: bool = False,
     ):
         self.model_path = model_path
         self.enforce_eager = enforce_eager
         self.tensor_parallel_size = tensor_parallel_size
         self.zmq_bridge = zmq_bridge
-        self.talker_llm = TalkerLLM(model_path, enforce_eager=enforce_eager, tensor_parallel_size=tensor_parallel_size, gpu_memory_utilization=0.3)
-        self.predictor_llm = PredictorLLM(model_path, enforce_eager=enforce_eager, tensor_parallel_size=tensor_parallel_size)
+        self._eager_speaker_encoder = bool(eager_speaker_encoder)
+        self.talker_llm = TalkerLLM(
+            model_path,
+            enforce_eager=enforce_eager,
+            tensor_parallel_size=tensor_parallel_size,
+            gpu_memory_utilization=talker_gpu_memory_utilization,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+        )
+        self.predictor_llm = PredictorLLM(
+            model_path,
+            enforce_eager=enforce_eager,
+            tensor_parallel_size=tensor_parallel_size,
+            gpu_memory_utilization=predictor_gpu_memory_utilization,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+        )
         self.processor = _get_processor(model_path)
         self.model_config = self.talker_llm.model_runner.full_config
         
@@ -287,7 +322,7 @@ class Qwen3TTSInterface:
                 dtype=torch.bfloat16,
             )
 
-        if self._speaker_encoder_available:
+        if self._speaker_encoder_available and self._eager_speaker_encoder:
             self._load_speaker_encoder()
 
     def _load_speaker_encoder(self):

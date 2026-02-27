@@ -11,6 +11,24 @@ from nano_qwen3tts_vllm.sampling_params import SamplingParams
 from nano_qwen3tts_vllm.engine.sequence import Sequence
 from nano_qwen3tts_vllm.engine.model_runner.base import ModelRunner
 
+_TOKENIZER_CACHE: dict[str, AutoTokenizer] = {}
+
+
+def _load_tokenizer(model_path: str) -> AutoTokenizer:
+    cached = _TOKENIZER_CACHE.get(model_path)
+    if cached is not None:
+        return cached
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            use_fast=True,
+            fix_mistral_regex=True,
+        )
+    except TypeError:
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+    _TOKENIZER_CACHE[model_path] = tokenizer
+    return tokenizer
+
 
 class LLMEngine:
 
@@ -29,7 +47,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
+        self.tokenizer = _load_tokenizer(config.model)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = None  # subclasses create after model_runner post_init sets config.num_kvcache_blocks
         atexit.register(self.exit)
