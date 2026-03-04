@@ -579,32 +579,44 @@ class Qwen3TTSInterface:
         ref_audio: Any,
         ref_text: Optional[str] = None,
         x_vector_only_mode: bool = False,
+        append_silence: bool = True,
+        silence_duration: float = 0.5,
     ) -> Dict[str, Any]:
         """Build voice-clone prompt from reference audio (and optionally reference text).
-        
+
         Args:
             ref_audio: Reference audio. Can be:
                 - str: wav path / URL / base64
                 - (np.ndarray, sr): waveform + sampling rate tuple
             ref_text: Reference transcript. Required when x_vector_only_mode=False (ICL mode).
             x_vector_only_mode: Whether to use speaker embedding only. If False, ICL mode will be used.
-        
+            append_silence: If True, append silence to reference audio before codec encoding.
+                Prevents the last phoneme of the reference from bleeding into generated speech.
+            silence_duration: Duration of appended silence in seconds (default: 0.5).
+
         Returns:
             voice_clone_prompt dict with keys: ref_code, ref_spk_embedding, x_vector_only_mode, icl_mode, ref_text.
         """
         if self.speech_tokenizer is None:
             raise RuntimeError("speech_tokenizer not available. Cannot create voice clone prompt.")
-        
+
         if not x_vector_only_mode:
             if ref_text is None or ref_text == "":
                 raise ValueError("ref_text is required when x_vector_only_mode=False (ICL mode).")
-        
+
         # Normalize audio input
         wav, sr = self._normalize_audio_inputs([ref_audio])[0]
-        
+
         ref_code = None
         if not x_vector_only_mode:
-            enc = self.speech_tokenizer.tokenizer.encode(wav, sr=sr)
+            # Append silence so the last codec tokens encode silence instead of
+            # a trailing phoneme, preventing it from bleeding into generated speech.
+            if append_silence and silence_duration > 0:
+                silence = np.zeros(int(sr * silence_duration), dtype=np.float32)
+                wav_for_encode = np.concatenate([wav, silence])
+            else:
+                wav_for_encode = wav
+            enc = self.speech_tokenizer.tokenizer.encode(wav_for_encode, sr=sr)
             ref_code = enc.audio_codes[0].cpu()
         
         # Resample to 24kHz for speaker encoder if needed
