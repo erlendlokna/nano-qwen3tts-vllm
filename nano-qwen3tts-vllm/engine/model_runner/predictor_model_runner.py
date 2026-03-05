@@ -99,8 +99,8 @@ class PredictorModelRunner(ModelRunner):
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(positions, input_embeds, is_prefill, generation_steps)
         if self.rank == 0:
-            self._apply_seed(seqs)
-            token_ids = self.sampler(logits, temperatures).tolist()
+            generator = self._make_generator(seqs)
+            token_ids = self.sampler(logits, temperatures, generator=generator).tolist()
         else:
             token_ids = None
 

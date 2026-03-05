@@ -230,12 +230,14 @@ class ModelRunner:
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
-    def _apply_seed(self, seqs: list[Sequence]):
-        """Set CUDA RNG seed if any sequence in the batch carries one."""
+    def _make_generator(self, seqs: list[Sequence]):
+        """Create a seeded CUDA generator if any sequence carries a seed."""
         for seq in seqs:
             if seq.seed is not None:
-                torch.cuda.manual_seed(seq.seed + seq.num_tokens)
-                return
+                g = torch.Generator(device="cuda")
+                g.manual_seed(seq.seed + seq.num_tokens)
+                return g
+        return None
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_embeds = None
@@ -247,8 +249,8 @@ class ModelRunner:
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill, input_embeds)
         if self.rank == 0:
-            self._apply_seed(seqs)
-            token_ids = self.sampler(logits, temperatures).tolist()
+            generator = self._make_generator(seqs)
+            token_ids = self.sampler(logits, temperatures, generator=generator).tolist()
         else:
             token_ids = None
         reset_context()

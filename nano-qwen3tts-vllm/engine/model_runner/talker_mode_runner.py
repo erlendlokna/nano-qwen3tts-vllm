@@ -107,8 +107,8 @@ class TalkerModeModelRunner(ModelRunner):
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits, hidden_states = self.run_model(input_ids, positions, is_prefill, input_embeds)
         if self.rank == 0:
-            self._apply_seed(seqs)
-            token_ids = self.sampler(logits, temperatures).tolist()
+            generator = self._make_generator(seqs)
+            token_ids = self.sampler(logits, temperatures, generator=generator).tolist()
         else:
             token_ids = None
         reset_context()
