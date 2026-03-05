@@ -91,15 +91,19 @@ class PredictorModelRunner(ModelRunner):
             input_ids, input_embeds, positions = self.prepare_prefill(seqs)
         else:
             input_ids, positions = self.prepare_decode(seqs)
-            
+
         generation_steps = [seq.generation_steps for seq in seqs]
-            
+
         input_embeds = self.model.get_input_embeddings(input_ids, input_embeds, generation_steps)
 
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(positions, input_embeds, is_prefill, generation_steps)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
-        
+        if self.rank == 0:
+            self._apply_seed(seqs)
+            token_ids = self.sampler(logits, temperatures).tolist()
+        else:
+            token_ids = None
+
         reset_context()
         return token_ids
     

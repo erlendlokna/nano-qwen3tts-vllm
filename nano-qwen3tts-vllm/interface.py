@@ -772,27 +772,29 @@ class Qwen3TTSInterface:
         instruct: str,
         language: str = None,
         non_streaming_mode: bool = True,
+        seed: int | None = None,
     ):
         """Generate speech with voice design (yields codec chunks).
-        
+
         Voice design generates speech based on natural language instructions describing
         the desired voice characteristics (gender, age, tone, etc.). The instruct parameter
         controls the voice output, and no speaker embedding is used.
-        
+
         This is a generator that yields codebook_id chunks. Use SpeechTokenizer to decode.
-        
+
         Args:
             text: Text to synthesize (single string only, no batch support).
             instruct: Instruction describing desired voice/style (e.g., "Male, 30 years old, deep voice").
             language: Language for the sample (default: "Auto").
             non_streaming_mode: Using non-streaming text input.
-        
+            seed: Optional random seed for reproducible voice generation.
+
         Yields:
             Codebook ID chunks (List[int]). Use SpeechTokenizer.decode() to convert to audio.
-            
+
         Example:
             chunks = list(interface.generate_voice_design(
-                text="Hello", 
+                text="Hello",
                 instruct="Male, 30 years old, calm and professional"
             ))
             wavs, sr = interface.speech_tokenizer.decode([{"audio_codes": chunks}])
@@ -832,10 +834,10 @@ class Qwen3TTSInterface:
         yield from self._generate_caller_driven(
             talker_input_embeds, trailing_text_hiddens, tts_pad_embed,
             str(uuid.uuid4()),
-            SamplingParams(temperature=0.9, max_tokens=1),
-            SamplingParams(temperature=0.9, max_tokens=17),
+            SamplingParams(temperature=0.9, max_tokens=1, seed=seed),
+            SamplingParams(temperature=0.9, max_tokens=17, seed=seed),
         )
-    
+
     async def start_zmq_tasks(self) -> None:
         """Start the ZMQ dispatcher (thread + asyncio task) and engine loop. Call once before generate_async when zmq_bridge is set."""
         if self.zmq_bridge is None:
@@ -942,6 +944,7 @@ class Qwen3TTSInterface:
         language: str = None,
         non_streaming_mode: bool = True,
         request_id: Optional[str] = None,
+        seed: int | None = None,
     ):
         """Async generator of codebook_id chunks for voice design. Requires zmq_bridge.
 
@@ -950,6 +953,7 @@ class Qwen3TTSInterface:
             instruct: Instruction describing desired voice/style.
             language: Language for the sample (default: "Auto").
             non_streaming_mode: Using non-streaming text input.
+            seed: Optional random seed for reproducible voice generation.
 
         Yields:
             Codebook ID chunks (List[int]).
@@ -993,6 +997,7 @@ class Qwen3TTSInterface:
             tts_pad_embed,
             talker_attention_mask,
             request_id=request_id,
+            seed=seed,
         ):
             yield chunk
 
@@ -1126,12 +1131,13 @@ class Qwen3TTSInterface:
         tts_pad_embed: torch.Tensor,
         talker_attention_mask: torch.Tensor,
         request_id: str | None = None,
+        seed: int | None = None,
     ):
         """Async generator of codebook_id chunks. ZMQ path; step() runs on event loop thread. Call await start_zmq_tasks() first."""
         if self.zmq_bridge is None:
             raise RuntimeError("generate_async requires zmq_bridge")
-        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1)
-        predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
+        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1, seed=seed)
+        predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17, seed=seed)
         request_id = request_id or str(uuid.uuid4())
         if self._consume_request_cancelled(request_id):
             return

@@ -103,10 +103,14 @@ class TalkerModeModelRunner(ModelRunner):
             input_ids, input_embeds, positions = self.prepare_prefill(seqs)
         else:
             input_ids, input_embeds, positions = self.prepare_decode_talker(seqs)
-            
+
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits, hidden_states = self.run_model(input_ids, positions, is_prefill, input_embeds)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+        if self.rank == 0:
+            self._apply_seed(seqs)
+            token_ids = self.sampler(logits, temperatures).tolist()
+        else:
+            token_ids = None
         reset_context()
         return token_ids, hidden_states
     
