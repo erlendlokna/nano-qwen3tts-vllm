@@ -232,7 +232,7 @@ class Qwen3TTSInterface:
         self.speech_tokenizer = external_speech_tokenizer
         self.speaker_encoder = None
         self._tts_model_type = self._detect_tts_model_type()
-        self._speaker_encoder_available = self._tts_model_type == "base"
+        self._speaker_encoder_available = self._tts_model_type in ("base", "voice_design")
         self._init_speech_components()
 
         # ZMQ path: asyncio queues; dispatcher and engine run as asyncio tasks (no threads).
@@ -373,6 +373,56 @@ class Qwen3TTSInterface:
             self.speaker_encoder = self.speaker_encoder.to(self.dtype)
         self.speaker_encoder = self.speaker_encoder.eval()
         return self.speaker_encoder
+
+    def load_speaker_encoder_from(self, model_path: str) -> None:
+        """Load speaker encoder from an external model path.
+
+        Only reads the speaker_encoder.* keys from the safetensors file —
+        the main model weights are never loaded into memory.
+
+        Useful when the current model (e.g. VoiceDesign) does not bundle
+        speaker encoder weights but feature extraction is needed.
+        """
+        if self.speaker_encoder is not None:
+            return
+
+        from qwen_tts.core.models.configuration_qwen3_tts import (
+            Qwen3TTSSpeakerEncoderConfig,
+        )
+        from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSSpeakerEncoder
+        from safetensors import safe_open
+
+        config_path = Path(model_path) / "config.json"
+        with config_path.open("r", encoding="utf-8") as f:
+            loaded = json.load(f)
+
+        speaker_cfg_raw = loaded.get("speaker_encoder_config")
+        if speaker_cfg_raw is None:
+            raise RuntimeError(f"speaker_encoder_config missing in {config_path}")
+
+        speaker_encoder = Qwen3TTSSpeakerEncoder(
+            Qwen3TTSSpeakerEncoderConfig(**speaker_cfg_raw)
+        )
+
+        prefix = "speaker_encoder."
+        state_dict = {}
+        weights_path = Path(model_path) / "model.safetensors"
+        with safe_open(str(weights_path), framework="pt", device="cpu") as sf:
+            for key in sf.keys():
+                if key.startswith(prefix):
+                    state_dict[key[len(prefix):]] = sf.get_tensor(key)
+
+        if not state_dict:
+            raise RuntimeError(f"speaker encoder weights not found in {weights_path}")
+
+        speaker_encoder.load_state_dict(state_dict, strict=False)
+        self.speaker_encoder = speaker_encoder.to(self.device)
+        if hasattr(self, "dtype"):
+            self.speaker_encoder = self.speaker_encoder.to(self.dtype)
+        self.speaker_encoder = self.speaker_encoder.eval()
+        self._speaker_encoder_available = True
+        logger.info("Speaker encoder loaded from %s (%d params)",
+                     model_path, sum(p.numel() for p in self.speaker_encoder.parameters()))
 
     def _build_ref_text(self, text: str) -> str:
         """Build reference text format for ICL mode.
@@ -775,7 +825,6 @@ class Qwen3TTSInterface:
         instruct: str,
         language: str = None,
         non_streaming_mode: bool = True,
-        seed: int | None = None,
     ):
         """Generate speech with voice design (yields codec chunks).
 
@@ -790,7 +839,6 @@ class Qwen3TTSInterface:
             instruct: Instruction describing desired voice/style (e.g., "Male, 30 years old, deep voice").
             language: Language for the sample (default: "Auto").
             non_streaming_mode: Using non-streaming text input.
-            seed: Optional random seed for reproducible voice generation.
 
         Yields:
             Codebook ID chunks (List[int]). Use SpeechTokenizer.decode() to convert to audio.
@@ -837,8 +885,8 @@ class Qwen3TTSInterface:
         yield from self._generate_caller_driven(
             talker_input_embeds, trailing_text_hiddens, tts_pad_embed,
             str(uuid.uuid4()),
-            SamplingParams(temperature=0.9, max_tokens=1, seed=seed),
-            SamplingParams(temperature=0.9, max_tokens=17, seed=seed),
+            SamplingParams(temperature=0.9, max_tokens=1),
+            SamplingParams(temperature=0.9, max_tokens=17),
         )
 
     async def start_zmq_tasks(self) -> None:
@@ -947,7 +995,6 @@ class Qwen3TTSInterface:
         language: str = None,
         non_streaming_mode: bool = True,
         request_id: Optional[str] = None,
-        seed: int | None = None,
         max_generation_steps: int = 2160,
     ):
         """Async generator of codebook_id chunks for voice design. Requires zmq_bridge.
@@ -957,7 +1004,6 @@ class Qwen3TTSInterface:
             instruct: Instruction describing desired voice/style.
             language: Language for the sample (default: "Auto").
             non_streaming_mode: Using non-streaming text input.
-            seed: Optional random seed for reproducible voice generation.
             max_generation_steps: Safety cap on generation steps (default 2160 ≈ 3min at 12Hz).
 
         Yields:
@@ -1002,7 +1048,6 @@ class Qwen3TTSInterface:
             tts_pad_embed,
             talker_attention_mask,
             request_id=request_id,
-            seed=seed,
             max_generation_steps=max_generation_steps,
         ):
             yield chunk
@@ -1137,14 +1182,13 @@ class Qwen3TTSInterface:
         tts_pad_embed: torch.Tensor,
         talker_attention_mask: torch.Tensor,
         request_id: str | None = None,
-        seed: int | None = None,
         max_generation_steps: int | None = None,
     ):
         """Async generator of codebook_id chunks. ZMQ path; step() runs on event loop thread. Call await start_zmq_tasks() first."""
         if self.zmq_bridge is None:
             raise RuntimeError("generate_async requires zmq_bridge")
-        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1, seed=seed)
-        predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17, seed=seed)
+        talker_sampling_params = SamplingParams(temperature=0.9, max_tokens=1)
+        predictor_sampling_params = SamplingParams(temperature=0.9, max_tokens=17)
         request_id = request_id or str(uuid.uuid4())
         if self._consume_request_cancelled(request_id):
             return
