@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import os
 import queue
 import threading
@@ -17,6 +18,8 @@ import soundfile as sf
 import time
 import torch
 from librosa.filters import mel as librosa_mel_fn
+
+logger = logging.getLogger(__name__)
 
 from nano_qwen3tts_vllm.utils.prompt import prepare_custom_voice_prompt, _ensure_list, _tokenize_texts
 from nano_qwen3tts_vllm.processor import Qwen3TTSProcessor
@@ -945,6 +948,7 @@ class Qwen3TTSInterface:
         non_streaming_mode: bool = True,
         request_id: Optional[str] = None,
         seed: int | None = None,
+        max_generation_steps: int = 2160,
     ):
         """Async generator of codebook_id chunks for voice design. Requires zmq_bridge.
 
@@ -954,6 +958,7 @@ class Qwen3TTSInterface:
             language: Language for the sample (default: "Auto").
             non_streaming_mode: Using non-streaming text input.
             seed: Optional random seed for reproducible voice generation.
+            max_generation_steps: Safety cap on generation steps (default 2160 ≈ 3min at 12Hz).
 
         Yields:
             Codebook ID chunks (List[int]).
@@ -998,6 +1003,7 @@ class Qwen3TTSInterface:
             talker_attention_mask,
             request_id=request_id,
             seed=seed,
+            max_generation_steps=max_generation_steps,
         ):
             yield chunk
 
@@ -1132,6 +1138,7 @@ class Qwen3TTSInterface:
         talker_attention_mask: torch.Tensor,
         request_id: str | None = None,
         seed: int | None = None,
+        max_generation_steps: int | None = None,
     ):
         """Async generator of codebook_id chunks. ZMQ path; step() runs on event loop thread. Call await start_zmq_tasks() first."""
         if self.zmq_bridge is None:
@@ -1204,6 +1211,9 @@ class Qwen3TTSInterface:
                     else:
                         next_talker_embeds = next_talker_embeds + tts_pad_embed
                     generation_step += 1
+                    if max_generation_steps is not None and generation_step >= max_generation_steps:
+                        logger.warning("Hit max_generation_steps=%d for request %s", max_generation_steps, request_id)
+                        break
                     self.talker_llm.add_request([next_talker_embeds], talker_sampling_params, request_id=request_id)
         finally:
             # Clear pending LLM requests so the engine loop stops working on them
